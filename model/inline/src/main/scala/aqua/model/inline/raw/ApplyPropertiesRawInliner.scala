@@ -63,7 +63,8 @@ object ApplyPropertiesRawInliner extends RawInliner[ApplyPropertyRaw] {
     p match {
       case IntoFieldRaw(field, t) =>
         State.pure(IntoFieldModel(field, t) -> Inline.empty)
-      case IntoIndexRaw(vm: ApplyPropertyRaw, t) =>
+      case f@IntoIndexRaw(vm: ApplyPropertyRaw, t) =>
+        println("unfold: " + f)
         for {
           nn <- Mangler[S].findAndForbidName("ap-prop")
         } yield IntoIndexModel(nn, t) -> Inline.preload(nn -> vm)
@@ -94,6 +95,8 @@ object ApplyPropertiesRawInliner extends RawInliner[ApplyPropertyRaw] {
     propertyPrefix: Inline,
     propertiesAllowed: Boolean
   ): State[S, (ValueModel, Inline)] = {
+    println("property models: " + propertyModels)
+    println("raw: " + raw)
     Exports[S].exports.flatMap { exports =>
       unfold(raw, propertiesAllowed).flatMap {
         case (v: VarModel, prefix) =>
@@ -103,6 +106,7 @@ object ApplyPropertiesRawInliner extends RawInliner[ApplyPropertyRaw] {
               for {
                 uniqueResultName <- Mangler[S].findAndForbidName(v.name + "_result_canon")
                 uniqueTestName <- Mangler[S].findAndForbidName(v.name + "_test")
+                _ = println("idx: " + idx)
               } yield {
                 val varSTest = VarModel(uniqueTestName, st)
                 val iter = VarModel("s", st.element)
@@ -148,6 +152,8 @@ object ApplyPropertiesRawInliner extends RawInliner[ApplyPropertyRaw] {
               val vm = v.copy(properties = v.properties ++ propertyModels).resolveWith(exports)
               State.pure((vm, Inline.empty, false))
           }).flatMap { case (genV, genInline, isSeq) =>
+            println("genV 1: " + genV)
+            println("gen inline 1: " + genInline)
             val prefInline =
               if (isSeq)
                 Inline(
@@ -155,14 +161,22 @@ object ApplyPropertiesRawInliner extends RawInliner[ApplyPropertyRaw] {
                   Chain.one(SeqModel.wrap((propertyPrefix.predo ++ genInline.predo).toList: _*))
                 )
               else propertyPrefix |+| genInline
+            println("pref inline: " + prefInline)
+            println("prefix: " + prefix)
+            println("isSeq: " + isSeq)
+            println("prop pred: " + propertyPrefix)
             if (propertiesAllowed) State.pure(genV -> (prefix |+| prefInline))
             else
               removeProperty(genV).map { case (vmm, mpp) =>
+                println("mpp: " + mpp)
                 vmm -> (prefix |+| mpp |+| prefInline)
               }
           }
 
         case (v, prefix) =>
+          println("strange v: " + v)
+          println("strange prefix: " + prefix)
+          println("strange prop prefix: " + propertyPrefix)
           // What does it mean actually? I've no ides
           State.pure((v, prefix |+| propertyPrefix))
       }
@@ -174,12 +188,17 @@ object ApplyPropertiesRawInliner extends RawInliner[ApplyPropertyRaw] {
     properties: Chain[PropertyRaw],
     propertiesAllowed: Boolean
   ): State[S, (ValueModel, Inline)] = {
+    println("raw: " + raw)
+    println("properties: " + properties)
     properties
       .foldLeft[State[S, (Chain[PropertyModel], Inline, ValueRaw)]](
         State.pure((Chain.empty[PropertyModel], Inline.empty, raw))
       ) { case (pcm, p) =>
         pcm.flatMap { case (pc, m, r) =>
           unfoldProperty(p).map { case (pm, mm) =>
+            println("pm: " + pm)
+            println("m: " + m)
+            println("mm: " + mm)
             (pc :+ pm, m |+| mm, r)
           }
         }
@@ -217,7 +236,7 @@ object ApplyPropertiesRawInliner extends RawInliner[ApplyPropertyRaw] {
         (leftToFunctor, functor, right)
       }).map { case (left, functor, right) =>
         for {
-          vmLeftInline <- unfoldProperties(raw, left, propertiesAllowed)
+          vmLeftInline <- unfold(ApplyPropertyRaw.fromChain(raw, left), propertiesAllowed)
           (leftVM, leftInline) = vmLeftInline
           fRaw = ApplyFunctorRaw(leftVM.toRaw, functor)
           vmFunctorInline <- ApplyFunctorRawInliner(fRaw, false)
@@ -225,7 +244,16 @@ object ApplyPropertiesRawInliner extends RawInliner[ApplyPropertyRaw] {
           vmRightInline <- unfold(ApplyPropertyRaw.fromChain(fVM.toRaw, right), propertiesAllowed)
           (vm, rightInline) = vmRightInline
         } yield {
+          println("left inline: " + leftInline)
+          println("f inline: " + fInline)
+          println("right inline: " + rightInline)
           vm -> (leftInline |+| fInline |+| rightInline)
+          /*
+          vm -> Inline(
+            leftInline.flattenValues ++ fInline.flattenValues ++ rightInline.flattenValues,
+            Chain.one(SeqModel.wrap((leftInline.predo ++ fInline.predo ++ rightInline.predo).toList: _*))
+          )
+          */
         }
       }.getOrElse(unfoldProperties(raw, properties, propertiesAllowed))
     }

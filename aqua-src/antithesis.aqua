@@ -1,3 +1,4 @@
+
 data Record:
     relay_id: []string
     peer_id: string
@@ -39,5 +40,10 @@ service Ser("ser"):
 --         a = 1 + 1
 --     <- a
 
-func emptySugar(arr: []Record) -> u32:
-  <- arr[1].relay_id.length
+service Op("op"):
+    identity(s: u32) -> u32
+
+func create_subnet0(l: []string) -> *string:
+    uploaded: *string
+    join uploaded[l.length]
+    <- uploaded
